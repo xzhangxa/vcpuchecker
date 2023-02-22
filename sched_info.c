@@ -1,11 +1,11 @@
 #include <argp.h>
-#include <bpf/libbpf.h>
 #include <signal.h>
 #include <stdbool.h>
 #include <stdlib.h>
 #include <stdio.h>
 #include <sys/resource.h>
 #include <time.h>
+#include <bpf/libbpf.h>
 #include "sched_info.h"
 #include "sched_info.skel.h"
 

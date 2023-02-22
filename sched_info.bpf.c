@@ -1,9 +1,9 @@
 #include "vmlinux.h"
 // #include <asm/vmx.h>
-#include "sched_info.h"
 #include <bpf/bpf_core_read.h>
 #include <bpf/bpf_helpers.h>
 #include <bpf/bpf_tracing.h>
+#include "sched_info.h"
 
 char LICENSE[] SEC("license") = "Dual BSD/GPL";
 
@@ -62,5 +62,5 @@ int check_kvm_exit(struct kvm_exit_args *args) {
     return 0;
 }
 
-//SEC("tp/kvm/kvm_entry")
-//int handle_kvm_entry(struct kvm_vcpu *vcpu) { return 0; }
+// SEC("tp/kvm/kvm_entry")
+// int handle_kvm_entry(struct kvm_vcpu *vcpu) { return 0; }
