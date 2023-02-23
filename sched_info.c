@@ -5,6 +5,7 @@
 #include <stdio.h>
 #include <sys/resource.h>
 #include <time.h>
+#include <asm/vmx.h>
 #include <bpf/libbpf.h>
 #include "sched_info.h"
 #include "sched_info.skel.h"
@@ -57,10 +58,32 @@ static volatile bool exiting = false;
 
 static void sig_handler(int sig) { exiting = true; }
 
+static const char *vmx_exit_reason_str(__u32 exit_reason)
+{
+    struct reason_strs {
+        __u32 exit_reason;
+        const char *reason_str;
+    };
+    struct reason_strs strs[] = { VMX_EXIT_REASONS };
+
+    for (int i = 0; i < sizeof(strs)/sizeof(struct reason_strs); i++) {
+        if (strs[i].exit_reason == exit_reason)
+            return strs[i].reason_str;
+    }
+
+    return "unkown exit reason";
+}
+
 static int handle_event(void *ctx, void *data, size_t data_sz) {
     const struct event *e = data;
 
-    printf("pid=%u vcpu_id=%u reason=%u\n", e->pid, e->vcpu_id, e->exit_reason);
+    if (e->type == KVM_EXIT_VCPU_MAPPING_CHANGE) {
+        printf("event=KVM_EXIT_VCPU_MAPPING_CHANGE pid=%u vcpu_id=%d cpu=%d orig_cpu=%d exit_reason=%s\n",
+               e->pid, e->vcpu_id, e->cpu, e->orig_cpu, vmx_exit_reason_str(e->exit_reason));
+    } else if (e->type == KVM_EXIT_ENTRY) {
+        //printf("event=KVM_EXIT_ENTRY pid=%u vcpu_id=%u cpu=%u orig_cpu=%u exit_reason=%s\n",
+        //       e->pid, e->vcpu_id, e->cpu, e->orig_cpu, vmx_exit_reason_str(e->exit_reason));
+    }
 
     return 0;
 }
