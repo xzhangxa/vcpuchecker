@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.16)
-project(sched_info)
+project(vcpuchecker LANGUAGES C CXX)
 
 list(APPEND CMAKE_MODULE_PATH ${PROJECT_SOURCE_DIR}/3rdparty/libbpf-bootstrap/cmake)
 
@@ -38,9 +38,9 @@ set(LIBBPF_INCLUDE_DIRS ${PROJECT_BINARY_DIR}/libbpf)
 set(LIBBPF_LIBRARIES ${PROJECT_BINARY_DIR}/libbpf/libbpf.a)
 find_package(BpfObject REQUIRED)
 
-set(app ${PROJECT_NAME})
-bpf_object(${app} ${app}.bpf.c)
-add_dependencies(${app}_skel libbpf-build)
-add_executable(${app} ${app}.c)
-target_include_directories(${app} PRIVATE ${PROJECT_SOURCE_DIR})
-target_link_libraries(${app} ${app}_skel)
+bpf_object(kvm_exit src/kvm_exit.bpf.c)
+add_dependencies(kvm_exit_skel libbpf-build)
+
+add_executable(${PROJECT_NAME} src/main.cpp src/kvm_exit.c)
+target_include_directories(${PROJECT_NAME} PRIVATE ${PROJECT_SOURCE_DIR})
+target_link_libraries(${PROJECT_NAME} kvm_exit_skel)

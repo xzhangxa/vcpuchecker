@@ -2,15 +2,21 @@
 #include <bpf/bpf_core_read.h>
 #include <bpf/bpf_helpers.h>
 #include <bpf/bpf_tracing.h>
-#include "sched_info.h"
+#include "vc_event.h"
 
 char LICENSE[] SEC("license") = "Dual BSD/GPL";
+
+struct vc_exit_value {
+    u32 cpu;
+    u32 exit_reason;
+    u64 time_ns;
+};
 
 struct {
     __uint(type, BPF_MAP_TYPE_HASH);
     __uint(max_entries, 4096);
     __type(key, u32);
-    __type(value, u64);
+    __type(value, struct vc_exit_value);
 } kvm_exit_map SEC(".maps");
 
 struct {
@@ -37,14 +43,15 @@ int check_kvm_exit(struct kvm_exit_args *args)
     u32 vcpu_id;
     u32 exit_reason;
     u32 cpu;
-    u64 value = 0;
+    struct vc_exit_value value;
 
     vcpu_id = args->vcpu_id;
     exit_reason = args->exit_reason;
     cpu = bpf_get_smp_processor_id();
     // update BPF map
-    value = cpu;
-    value = (value << 32) | exit_reason;
+    value.cpu = cpu;
+    value.exit_reason = exit_reason;
+    value.time_ns = bpf_ktime_get_ns();
     bpf_map_update_elem(&kvm_exit_map, &vcpu_id, &value, BPF_ANY);
 
     return 0;
@@ -60,11 +67,12 @@ SEC("tp/kvm/kvm_entry")
 int check_kvm_entry(struct kvm_entry_args *args)
 {
     int i;
-    struct event *e;
+    struct kvm_exit_info *e;
     u32 orig_cpu, cpu;
     u32 vcpu_id;
     u32 exit_reason;
-    u64 *value;
+    u64 time_ns;
+    struct vc_exit_value *value;
 
     vcpu_id = args->vcpu_id;
     cpu = bpf_get_smp_processor_id();
@@ -73,38 +81,39 @@ int check_kvm_entry(struct kvm_entry_args *args)
     if (!value)
         return 0;
 
-    orig_cpu = *value >> 32;
-    exit_reason = (u32)*value;
+    orig_cpu = value->cpu;
+    exit_reason = value->exit_reason;
+    time_ns = bpf_ktime_get_ns() - value->time_ns;
     bpf_map_delete_elem(&kvm_exit_map, &vcpu_id);
+
+    if (cpu == orig_cpu)
+        return 0;
 
     // send ringbuf
     e = bpf_ringbuf_reserve(&rb, sizeof(*e), 0);
     if (!e)
         return 0;
 
-    if (cpu != orig_cpu)
-        e->type = KVM_EXIT_VCPU_MAPPING_CHANGE;
-    else
-        e->type = KVM_EXIT_ENTRY;
     e->pid = bpf_get_current_pid_tgid() >> 32;
     e->vcpu_id = vcpu_id;
     e->cpu = cpu;
     e->orig_cpu = orig_cpu;
     e->exit_reason = exit_reason;
+    e->time_ns = time_ns;
+    bpf_get_current_comm(e->comm, TASK_COMM_LEN);
 
     bpf_ringbuf_submit(e, 0);
 
     return 0;
 }
 
-
 #if 0
 #ifdef CONFIG_X86_64
-#define MAX_NR_USER_RETURN_MSRS	7
+#define MAX_NR_USER_RETURN_MSRS 7
 #else
-#define MAX_NR_USER_RETURN_MSRS	4
+#define MAX_NR_USER_RETURN_MSRS 4
 #endif
-#define MAX_NR_LOADSTORE_MSRS	8
+#define MAX_NR_LOADSTORE_MSRS 8
 struct vmx_uret_msr {
 	bool load_into_hardware;
 	u64 data;
@@ -236,7 +245,7 @@ struct vcpu_vmx {
 SEC("raw_tracepoint/kvm_exit")
 int check_raw_kvm_exit(struct bpf_raw_tracepoint_args *ctx)
 {
-    struct event *e;
+    struct kvm_exit_info *e;
     struct kvm_vcpu *vcpu = (struct kvm_vcpu *)ctx->args[0];
     struct vcpu_vmx *vmx = container_of(vcpu, struct vcpu_vmx, vcpu);
     u32 isa = (u32)ctx->args[1];
@@ -246,11 +255,9 @@ int check_raw_kvm_exit(struct bpf_raw_tracepoint_args *ctx)
     if (!e)
         return 0;
 
-    e->type = KVM_EXIT;
     e->pid = bpf_get_current_pid_tgid() >> 32;
     e->vcpu_id = BPF_CORE_READ(vcpu, vcpu_id);
     e->cpu = BPF_CORE_READ(vcpu, cpu);
-    e->raw_event = true;
     e->exit_reason = BPF_CORE_READ(vmx, exit_reason.full);
 
     bpf_ringbuf_submit(e, 0);
