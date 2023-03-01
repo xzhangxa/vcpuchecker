@@ -15,30 +15,20 @@ static struct env {
 
 const char *argp_program_version = "vcpuchecker 0.0";
 const char argp_program_doc[] =
-    "KVM kvm_exit reasons.\n"
+    "Check KVM guest vcpu scheduling on physical cores.\n"
     "\n"
     "This tool traces kvm guest vcpu schedule and associated \n"
     "information (filename, process duration, PID, etc).\n"
     "\n"
-    "USAGE: ./vcpuchecker [-d <min-duration-ms>]\n";
+    "USAGE: sudo ./vcpuchecker\n";
 
 static const struct argp_option opts[] = {
-    {"duration", 'd', "DURATION-MS", 0,
-     "Minimum process duration (ms) to report"},
     {},
 };
 
 static error_t parse_arg(int key, char *arg, struct argp_state *state)
 {
     switch (key) {
-    case 'd':
-        errno = 0;
-        env.min_duration_ms = strtol(arg, NULL, 10);
-        if (errno || env.min_duration_ms <= 0) {
-            fprintf(stderr, "Invalid duration: %s\n", arg);
-            argp_usage(state);
-        }
-        break;
     case ARGP_KEY_ARG:
         argp_usage(state);
         break;
