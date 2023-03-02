@@ -2,8 +2,8 @@
 
 ## Requirements
 
-12th/13th Gen Intel Core CPUs (Alder Lake, Raptor Lake)
-(optional) Linux kernel version >= 5.18, with kernel config `CONFIG_INTEL_HFI_THERMAL` to show CPU HFI info from HW.
+- 12th/13th Gen Intel Core CPUs (Alder Lake, Raptor Lake)
+- (optional) Linux kernel version >= 5.18, with kernel config `CONFIG_INTEL_HFI_THERMAL` to show CPU HFI info from HW.
 
 ## Build
 
