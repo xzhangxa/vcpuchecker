@@ -7,6 +7,7 @@
 
 struct kvm_exit_info {
     uint32_t pid;
+    uint32_t tgid;
     char comm[TASK_COMM_LEN];
     uint32_t vcpu_id;
     uint32_t cpu;

@@ -71,6 +71,7 @@ int check_kvm_entry(struct kvm_entry_args *args)
     u32 orig_cpu, cpu;
     u32 vcpu_id;
     u32 exit_reason;
+    u64 pid_tgid;
     u64 time_ns;
     struct vc_exit_value *value;
 
@@ -94,7 +95,9 @@ int check_kvm_entry(struct kvm_entry_args *args)
     if (!e)
         return 0;
 
-    e->pid = bpf_get_current_pid_tgid() >> 32;
+    pid_tgid = bpf_get_current_pid_tgid();
+    e->tgid = pid_tgid >> 32;
+    e->pid = pid_tgid & 0xFFFFFFFF;
     e->vcpu_id = vcpu_id;
     e->cpu = cpu;
     e->orig_cpu = orig_cpu;

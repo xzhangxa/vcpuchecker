@@ -51,8 +51,8 @@ static void sig_handler(int sig) { exiting = true; }
 static void kvm_exit_func(struct kvm_exit_info *info)
 {
     printf(
-        "process=%s(%u) vcpu_id=%d cpu=%u->%u exit_reason=%s duration=%luns\n",
-        info->comm, info->pid, info->vcpu_id, info->orig_cpu, info->cpu,
+        "process=%s(%u-%u) vcpu_id=%d cpu=%u->%u exit_reason=%s duration=%luns\n",
+        info->comm, info->tgid, info->pid, info->vcpu_id, info->orig_cpu, info->cpu,
         vmx_exit_str(info->exit_reason), info->time_ns);
 }
 
