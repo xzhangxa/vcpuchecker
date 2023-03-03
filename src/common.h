@@ -1,6 +1,8 @@
 #ifndef _COMMON_H_
 #define _COMMON_H_
 
+#include <stdbool.h>
+#include <stdint.h>
 #include <cpuid.h>
 
 #ifdef __cplusplus
@@ -8,6 +10,24 @@ extern "C" {
 #endif
 
 #define BIT(x) (1 << (x))
+
+extern volatile bool exiting;
+extern void display_loop(void);
+
+struct core_info {
+    unsigned int id;
+    uint8_t perf;
+    uint8_t eff;
+    unsigned int ht_pair;
+    bool is_perf_core;
+};
+
+struct vcpu_info {
+    unsigned int vcpu_id;
+    unsigned int curr_cpu;
+    unsigned int domain_id;
+    double percent_on_perf_core;
+};
 
 inline static int cpuid_leaf6(int bit)
 {

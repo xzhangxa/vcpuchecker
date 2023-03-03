@@ -42,6 +42,6 @@ bpf_object(kvm_exit src/kvm_exit.bpf.c)
 add_dependencies(kvm_exit_skel libbpf-build)
 add_dependencies(kvm_exit_skel bpftool-build)
 
-add_executable(${PROJECT_NAME} src/main.cpp src/kvm_exit.c src/hfi.c)
+add_executable(${PROJECT_NAME} src/main.c src/display.cpp src/kvm_exit.c src/hfi.c)
 target_include_directories(${PROJECT_NAME} PRIVATE ${PROJECT_SOURCE_DIR}/src /usr/include/libnl3)
 target_link_libraries(${PROJECT_NAME} kvm_exit_skel nl-3 nl-genl-3)
