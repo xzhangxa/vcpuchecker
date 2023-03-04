@@ -2,29 +2,58 @@
 #include <stdint.h>
 #include <stdlib.h>
 #include <stdio.h>
+#include <signal.h>
 #include <thread>
-#include "common.h"
+#include <chrono>
+#include <mutex>
+#include <map>
+#include "cpu.h"
 #include "kvm_exit.h"
 #include "hfi.h"
 
-volatile bool exiting = false;
+using namespace std::chrono_literals;
 
-static void update_core_info(struct core_info *info)
+static volatile bool exiting = false;
+
+static std::mutex _map_mutex;
+static std::map<int, struct core_info> _core_map;
+
+struct vcpu_info {
+    unsigned int vcpu_id;
+    unsigned int curr_cpu;
+    unsigned int domain_id;
+    double percent_on_perf_core;
+};
+
+int init_core_info(void)
 {
-    // TODO
+    for (int i = 0; i < total_cpu_num(); i++) {
+        _core_map[i].id = i;
+        _core_map[i].type = hybrid_core_type(i);
+    }
+    return 0;
 }
 
-static void update_vcpu_info(struct vcpu_info *info)
+static void update_core_info(int id, uint8_t perf, uint8_t effi)
+{
+    std::lock_guard<std::mutex> guard(_map_mutex);
+    if (_core_map.find(id) != _core_map.end()) {
+        _core_map[id].perf = perf;
+        _core_map[id].effi = effi;
+    }
+}
+
+static void update_vcpu_info(struct vcpu_info &info)
 {
     // TODO
 }
 
 static void kvm_exit_func(struct kvm_exit_info *info)
 {
-    printf(
-        "process=%s(%u-%u) vcpu_id=%d cpu=%u->%u exit_reason=%s duration=%luns\n",
-        info->comm, info->tgid, info->pid, info->vcpu_id, info->orig_cpu, info->cpu,
-        vmx_exit_str(info->exit_reason), info->time_ns);
+    printf("process=%s(%u-%u) vcpu_id=%d cpu=%u->%u exit_reason=%s "
+           "duration=%luns\n",
+           info->comm, info->tgid, info->pid, info->vcpu_id, info->orig_cpu,
+           info->cpu, vmx_exit_str(info->exit_reason), info->time_ns);
     // TODO update_vcpu_info
 }
 
@@ -45,9 +74,8 @@ cleanup:
 
 static void hfi_cb(struct perf_cap *perf_cap)
 {
-    printf("cpu id %d, \tperf/eff [%d/%d]\n", perf_cap->cpu, perf_cap->perf,
-           perf_cap->eff);
-    // TODO update_core_info
+    update_core_info(perf_cap->cpu, (uint8_t)perf_cap->perf,
+                     (uint8_t)perf_cap->eff);
 }
 
 static void hfi_event_loop()
@@ -58,12 +86,23 @@ static void hfi_event_loop()
         err = hfi_recvmsg();
 }
 
+static void sig_handler(int sig) { exiting = true; }
+
+#ifdef __cplusplus
+extern "C" {
+#endif
+
 void display_loop(void)
 {
     int err;
     bool hfi_inited = false;
 
-    // TODO get all CPU cores and save core_info map
+    signal(SIGINT, sig_handler);
+    signal(SIGTERM, sig_handler);
+
+    err = init_core_info();
+    if (err)
+        return;
     // TODO get KVM guest domains and vcpu info and save to vcpu_info
 
     err = hfi_init(hfi_cb);
@@ -82,8 +121,23 @@ void display_loop(void)
     if (hfi_inited)
         hfi_thread = std::thread{hfi_event_loop};
 
+    while (!exiting) {
+        printf("==========================================================\n");
+        std::lock_guard<std::mutex> guard(_map_mutex);
+        for (auto it = _core_map.begin(); it != _core_map.end(); it++) {
+            printf("Core %d (%s)- perf %u effi %u\n", it->first,
+                   (it->second.type == INTEL_CORE) ? "P-core" : "E-core",
+                   it->second.perf, it->second.effi);
+        }
+        std::this_thread::sleep_for(1000ms);
+    }
+
     if (bpf_thread.joinable())
         bpf_thread.join();
     if (hfi_thread.joinable())
         hfi_thread.join();
 }
+
+#ifdef __cplusplus
+}
+#endif

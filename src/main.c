@@ -1,10 +1,11 @@
-#include <signal.h>
 #include <stdbool.h>
 #include <stdint.h>
 #include <stdlib.h>
 #include <stdio.h>
 #include <argp.h>
-#include "common.h"
+#include "cpu.h"
+
+extern void display_loop(void);
 
 const char *argp_program_version = "vcpuchecker 0.0";
 const char argp_program_doc[] =
@@ -37,8 +38,6 @@ static const struct argp argp = {
     .doc = argp_program_doc,
 };
 
-static void sig_handler(int sig) { exiting = true; }
-
 int main(int argc, char **argv)
 {
     int err;
@@ -48,15 +47,11 @@ int main(int argc, char **argv)
     if (err)
         return err;
 
-    if (!is_hfi_support()) {
-        fprintf(stderr, "Intel Hardware Feedback Interface is not found on the "
-                        "CPU, it's meaningless to run this tool on non-12/13 "
-                        "gen Intel Core CPUs\n");
+    if (!is_hybrid_cpu()) {
+        fprintf(stderr, "This is not an Intel hybrid CPU, it's meaningless to "
+                        "run this tool\n");
         return EXIT_FAILURE;
     }
-
-    signal(SIGINT, sig_handler);
-    signal(SIGTERM, sig_handler);
 
     display_loop();
 
