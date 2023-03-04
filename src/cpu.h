@@ -53,7 +53,7 @@ struct _result {
     int result;
 };
 
-inline static void *threadFunc(void *arg)
+inline static void *func_type(void *arg)
 {
     cpu_set_t cpuset;
     struct _result *result = (struct _result*)arg;
@@ -73,7 +73,7 @@ inline static enum core_type hybrid_core_type(int id)
     struct _result result;
 
     result.cpu = id;
-    ret = pthread_create(&t, NULL, threadFunc, &result);
+    ret = pthread_create(&t, NULL, func_type, &result);
     if (ret)
         return INTEL_GENERIC;
     ret = pthread_join(t, NULL);
