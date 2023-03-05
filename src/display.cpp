@@ -20,7 +20,10 @@
 #include "hfi.h"
 
 using namespace std::chrono_literals;
+using namespace std::chrono;
 namespace fs = std::filesystem;
+
+using time_ns = std::chrono::time_point<std::chrono::system_clock>;
 
 static volatile bool exiting = false;
 
@@ -34,6 +37,9 @@ struct vcpu_info {
     std::string domain_name;
     size_t vcpu_num;
     std::vector<int> curr_cpu;
+
+    std::vector<time_ns> start_time;
+    std::vector<time_ns> last_time;
     std::vector<double> percent_on_perf_core;
 };
 
@@ -129,7 +135,6 @@ static void add_vcpu_info_by_domain(virDomainPtr d, pid_t qemu_pid)
     info.domain_name = d_name;
     info.vcpu_num = dinfo->nrVirtCpu;
     info.curr_cpu.resize(info.vcpu_num);
-    info.percent_on_perf_core.resize(info.vcpu_num);
 
     cpuinfo = (virVcpuInfoPtr)malloc(sizeof(virVcpuInfo) * dinfo->nrVirtCpu);
     if (!cpuinfo) {
@@ -141,6 +146,21 @@ static void add_vcpu_info_by_domain(virDomainPtr d, pid_t qemu_pid)
     ret = virDomainGetVcpus(d, cpuinfo, dinfo->nrVirtCpu, NULL, 0);
     for (size_t i = 0; i < ret; i++)
         info.curr_cpu[i] = cpuinfo[i].cpu;
+
+    // time
+    time_ns curr = system_clock::now();
+    info.start_time.resize(info.vcpu_num, curr);
+    info.last_time.resize(info.vcpu_num, curr);
+    info.percent_on_perf_core.resize(info.vcpu_num);
+    for (size_t i = 0; i < info.vcpu_num; i++) {
+        auto core = _core_map.find(info.curr_cpu[i]);
+        if (core == _core_map.end()) {
+            fprintf(stderr, "cannot find core info, likely programming error");
+            return;
+        }
+        if (core->second.type == INTEL_CORE)
+            info.percent_on_perf_core[i] = 1.0;
+    }
 
     free(cpuinfo);
     free(dinfo);
@@ -190,6 +210,32 @@ static int init_vcpu_info(void)
     return 0;
 }
 
+static void update_percentage(struct vcpu_info &info, unsigned int vcpu_id)
+{
+    auto curr = system_clock::now();
+    auto start = info.start_time[vcpu_id];
+    auto last = info.last_time[vcpu_id];
+    auto old_percent = info.percent_on_perf_core[vcpu_id];
+    double new_percent;
+
+    info.last_time[vcpu_id] = curr;
+
+    auto core = _core_map.find(info.curr_cpu[vcpu_id]);
+    if (core == _core_map.end()) {
+        fprintf(stderr, "cannot find core info, likely programming error");
+        return;
+    }
+    int on_P = (core->second.type == INTEL_CORE) ? 1 : 0;
+
+    auto total_ns = duration_cast<nanoseconds>(curr - start).count();
+    auto last_ns = duration_cast<nanoseconds>(last - start).count();
+    auto passing_ns = duration_cast<nanoseconds>(curr - last).count();
+
+    new_percent = (last_ns * old_percent + passing_ns * on_P) / total_ns;
+
+    info.percent_on_perf_core[vcpu_id] = new_percent;
+}
+
 static void update_vcpu_info(pid_t qemu_id, unsigned int vcpu_id,
                              unsigned int orig_cpu, unsigned int cpu,
                              uint64_t time_ns)
@@ -201,15 +247,11 @@ static void update_vcpu_info(pid_t qemu_id, unsigned int vcpu_id,
 
     auto &domain = _vcpu_map[qemu_id];
 
-    if (vcpu_id >= domain.vcpu_num) {
-        domain.vcpu_num = vcpu_id + 1;
-        domain.curr_cpu.resize(vcpu_id + 1);
-        domain.percent_on_perf_core.resize(vcpu_id + 1);
-    }
+    // update vcpu P-core percent
+    update_percentage(domain, vcpu_id);
 
     domain.curr_cpu[vcpu_id] = cpu;
 
-    // TODO update percent
 }
 
 static void kvm_exit_func(struct kvm_exit_info *info)
@@ -294,11 +336,12 @@ void display_loop(void)
     while (!exiting) {
         printf("==========================================================\n");
         std::unique_lock<std::mutex> lock(_g_mutex);
-        for (auto it = _vcpu_map.cbegin(); it != _vcpu_map.cend(); it++) {
+        for (auto it = _vcpu_map.begin(); it != _vcpu_map.end(); it++) {
             printf("KVM guest domain %s (id %u) (qemu pid %u)\n",
                    it->second.domain_name.c_str(), it->second.domain_id,
                    it->first);
             for (int i = 0; i < it->second.vcpu_num; i++) {
+                update_percentage(it->second, i);
                 printf("\tvcpu %u \t-> Core %d \t%f%% on P-core\n", i,
                        it->second.curr_cpu[i],
                        it->second.percent_on_perf_core[i] * 100);
