@@ -8,7 +8,8 @@
 ## Build
 
 ```
-sudo apt install libelf-dev zlib1g-dev libnl-genl-3-dev cmake
+git submodule update --init --recursive
+sudo apt install libelf-dev zlib1g-dev libnl-genl-3-dev libvirt-dev cmake
 mkdir build && cd build
 cmake ..
 make
