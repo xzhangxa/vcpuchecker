@@ -13,7 +13,7 @@
 #include <linux/thermal.h>
 #include "hfi.h"
 
-static hfi_callback hfi_per_core_cb = NULL;
+static hfi_callback hfi_data_cb = NULL;
 
 struct hfi_event_data {
     struct nl_sock *nl_handle;
@@ -150,7 +150,6 @@ static int handle_event(struct nl_msg *n, void *arg)
         struct nlattr *cap;
         int j, index = 0;
 
-        printf("THERMAL_GENL_EVENT_CPU_CAPABILITY_CHANGE\n");
         nla_for_each_nested(cap, attrs[THERMAL_GENL_ATTR_CPU_CAPABILITY], j)
         {
             switch (index) {
@@ -169,8 +168,8 @@ static int handle_event(struct nl_msg *n, void *arg)
             ++index;
             if (index == 3) {
                 index = 0;
-                if (hfi_per_core_cb)
-                    hfi_per_core_cb(&perf_cap);
+                if (hfi_data_cb)
+                    hfi_data_cb(&perf_cap);
             }
         }
     }
@@ -214,7 +213,9 @@ int hfi_init(hfi_callback hfi_cb)
         goto free_sock;
     }
 
-    hfi_per_core_cb = hfi_cb;
+    nl_socket_set_nonblocking(sock);
+
+    hfi_data_cb = hfi_cb;
     nl_cb_set(drv.nl_cb, NL_CB_SEQ_CHECK, NL_CB_CUSTOM, seq_check_handler, 0);
     nl_cb_set(drv.nl_cb, NL_CB_VALID, NL_CB_CUSTOM, handle_event, NULL);
 
@@ -226,4 +227,13 @@ free_sock:
     return -1;
 }
 
-int hfi_recvmsg(void) { return nl_recvmsgs(drv.nl_handle, drv.nl_cb); }
+int hfi_recvmsg(void)
+{
+    int err = 0;
+
+    err = nl_recvmsgs(drv.nl_handle, drv.nl_cb);
+    if (err == -NLE_AGAIN)
+        err = 0;
+
+    return err;
+}

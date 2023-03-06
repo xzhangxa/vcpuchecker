@@ -24,8 +24,8 @@ enum core_type {
 
 struct core_info {
     int id;
-    uint8_t perf;
-    uint8_t effi;
+    int perf;
+    int effi;
     int ht_pair;
     enum core_type type;
 };

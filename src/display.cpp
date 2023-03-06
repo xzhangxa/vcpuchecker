@@ -48,11 +48,29 @@ int init_core_info(void)
     for (int i = 0; i < total_cpu_num(); i++) {
         _core_map[i].id = i;
         _core_map[i].type = hybrid_core_type(i);
+
+        /*
+         * Init the perf/effi values based on the most common values if no CPU
+         * load, in case:
+         * 1. Kernel is old or INTEL_HFI_THERMAL is not enabled
+         * 2. Some models report HFI data rarely, so after booting up the user
+         *    space will not get a notification for a long time.
+         * So these values are given manually, if HFI notification is properly
+         * set and the CPU models do report often, it could be changed anytime
+         * a HFI data notification is sent to user space.
+         */
+        if (_core_map[i].type == INTEL_CORE) {
+            _core_map[i].perf = 256;
+            _core_map[i].effi = 368;
+        } else if (_core_map[i].type == INTEL_ATOM) {
+            _core_map[i].perf = 152;
+            _core_map[i].effi = 400;
+        }
     }
     return 0;
 }
 
-static void update_core_info(int id, uint8_t perf, uint8_t effi)
+static void update_core_info(int id, int perf, int effi)
 {
     std::lock_guard<std::mutex> guard(_g_mutex);
     if (_core_map.find(id) != _core_map.end()) {
@@ -283,16 +301,17 @@ cleanup:
 
 static void hfi_cb(struct perf_cap *perf_cap)
 {
-    update_core_info(perf_cap->cpu, (uint8_t)perf_cap->perf,
-                     (uint8_t)perf_cap->eff);
+    update_core_info(perf_cap->cpu, perf_cap->perf, perf_cap->eff);
 }
 
 static void hfi_event_loop()
 {
-    int err;
+    int err = 0;
 
-    while (!exiting && !err)
+    while (!exiting && !err) {
         err = hfi_recvmsg();
+        std::this_thread::sleep_for(1s);
+    }
 }
 
 static void sig_handler(int sig) { exiting = true; }
@@ -348,7 +367,7 @@ void display_loop(void)
             }
         }
         for (auto it = _core_map.cbegin(); it != _core_map.cend(); it++) {
-            printf("Core %d (%s)- perf %u effi %u\n", it->first,
+            printf("Core %d (%s) - perf %u effi %u\n", it->first,
                    (it->second.type == INTEL_CORE) ? "P-core" : "E-core",
                    it->second.perf, it->second.effi);
         }

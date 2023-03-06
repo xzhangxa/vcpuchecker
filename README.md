@@ -14,3 +14,11 @@ mkdir build && cd build
 cmake ..
 make
 ```
+
+## HFI per-core data
+
+When the tool starts the perf/effi values are set based on the most common values if no CPU load, in case:
+1. Kernel is old or INTEL_HFI_THERMAL is not enabled
+2. Some models report HFI data rarely, so after booting up the user space will not get a notification for a long time.
+
+So common values are given manually at the tool starting, if HFI notification is properly set and the CPU models do report often, it could be changed anytime a HFI data notification is sent to user space.
