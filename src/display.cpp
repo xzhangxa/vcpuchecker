@@ -47,7 +47,8 @@ int init_core_info(void)
 {
     for (int i = 0; i < total_cpu_num(); i++) {
         _core_map[i].id = i;
-        _core_map[i].type = hybrid_core_type(i);
+        if (per_core_data(&_core_map[i]))
+            return -1;
 
         /*
          * Init the perf/effi values based on the most common values if no CPU
@@ -67,6 +68,7 @@ int init_core_info(void)
             _core_map[i].effi = 400;
         }
     }
+
     return 0;
 }
 
@@ -367,7 +369,8 @@ void display_loop(void)
             }
         }
         for (auto it = _core_map.cbegin(); it != _core_map.cend(); it++) {
-            printf("Core %d (%s) - perf %u effi %u\n", it->first,
+            printf("Core %d (%d, %s) - perf %u effi %u\n", it->first,
+                   it->second.core_id,
                    (it->second.type == INTEL_CORE) ? "P-core" : "E-core",
                    it->second.perf, it->second.effi);
         }

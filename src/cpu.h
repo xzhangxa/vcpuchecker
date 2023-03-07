@@ -26,7 +26,7 @@ struct core_info {
     int id;
     int perf;
     int effi;
-    int ht_pair;
+    int core_id;
     enum core_type type;
 };
 
@@ -50,37 +50,52 @@ inline static int is_hybrid_cpu(void) { return CPUID_BIT(0x7, edx, 15); }
 
 struct _result {
     int cpu;
-    int result;
+    int core_id;
+    int type;
 };
 
-inline static void *func_type(void *arg)
+inline static void *_per_core_func(void *arg)
 {
     cpu_set_t cpuset;
     struct _result *result = (struct _result*)arg;
+
     CPU_ZERO(&cpuset);
     CPU_SET(result->cpu, &cpuset);
-
     pthread_t self = pthread_self();
     pthread_setaffinity_np(self, sizeof(cpu_set_t), &cpuset);
-    result->result = CPUID_MASK(0x1a, eax, 0xFF000000, 24);
+
+    result->type = CPUID_MASK(0x1a, eax, 0xFF000000, 24);
+
+    int level = CPUID_MASK(0, eax, 0xFFFFFFFF, 0);
+    if (level >= 0x1F)
+        level = 0x1F;
+    else if (level >= 0xB)
+        level = 0xB;
+    int initial_apicid = CPUID_MASK(level, edx, 0xFFFFFFFF, 0);
+    int shift = CPUID_MASK(level, eax, 0x1F, 0);
+    result->core_id = initial_apicid >> shift;
+
     return NULL;
 }
 
-inline static enum core_type hybrid_core_type(int id)
+inline static int per_core_data(struct core_info *info)
 {
     pthread_t t;
     int ret;
     struct _result result;
 
-    result.cpu = id;
-    ret = pthread_create(&t, NULL, func_type, &result);
+    result.cpu = info->id;
+    ret = pthread_create(&t, NULL, _per_core_func, &result);
     if (ret)
-        return INTEL_GENERIC;
+        return -1;
     ret = pthread_join(t, NULL);
     if (ret)
-        return INTEL_GENERIC;
+        return -1;
 
-    return (enum core_type)result.result;
+    info->type = (enum core_type)result.type;
+    info->core_id = result.core_id;
+
+    return 0;
 }
 
 inline static int total_cpu_num(void) { return sysconf(_SC_NPROCESSORS_ONLN); }
