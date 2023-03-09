@@ -5,7 +5,6 @@
 #include <stdint.h>
 #include <stdlib.h>
 #include <cpuid.h>
-#include <pthread.h>
 #include <sys/sysinfo.h>
 #include <unistd.h>
 #include <sched.h>
@@ -16,11 +15,7 @@ extern "C" {
 
 #define _BIT(x) (1 << (x))
 
-enum core_type {
-    INTEL_CORE = 0x40,
-    INTEL_ATOM = 0x20,
-    INTEL_GENERIC = 0x0
-};
+enum core_type { INTEL_CORE = 0x40, INTEL_ATOM = 0x20, INTEL_GENERIC = 0x0 };
 
 struct core_info {
     int id;
@@ -28,6 +23,20 @@ struct core_info {
     int effi;
     int core_id;
     enum core_type type;
+    double precent;
+
+    unsigned long long int _total;
+    unsigned long long int _busy;
+    unsigned long long int _user;
+    unsigned long long int _nice;
+    unsigned long long int _system;
+    unsigned long long int _idle;
+    unsigned long long int _iowait;
+    unsigned long long int _irq;
+    unsigned long long int _softirq;
+    unsigned long long int _steal;
+    unsigned long long int _guest;
+    unsigned long long int _guestnice;
 };
 
 #define CPUID_BIT(LEAF, REG, BIT)                                              \
@@ -48,55 +57,10 @@ inline static int is_hfi_support(void) { return CPUID_BIT(0x6, eax, 19); }
 inline static int is_itd_support(void) { return CPUID_BIT(0x6, eax, 23); }
 inline static int is_hybrid_cpu(void) { return CPUID_BIT(0x7, edx, 15); }
 
-struct _result {
-    int cpu;
-    int core_id;
-    int type;
-};
-
-inline static void *_per_core_func(void *arg)
-{
-    cpu_set_t cpuset;
-    struct _result *result = (struct _result*)arg;
-
-    CPU_ZERO(&cpuset);
-    CPU_SET(result->cpu, &cpuset);
-    pthread_t self = pthread_self();
-    pthread_setaffinity_np(self, sizeof(cpu_set_t), &cpuset);
-
-    result->type = CPUID_MASK(0x1a, eax, 0xFF000000, 24);
-
-    int level = CPUID_MASK(0, eax, 0xFFFFFFFF, 0);
-    if (level >= 0x1F)
-        level = 0x1F;
-    else if (level >= 0xB)
-        level = 0xB;
-    int initial_apicid = CPUID_MASK(level, edx, 0xFFFFFFFF, 0);
-    int shift = CPUID_MASK(level, eax, 0x1F, 0);
-    result->core_id = initial_apicid >> shift;
-
-    return NULL;
-}
-
-inline static int per_core_data(struct core_info *info)
-{
-    pthread_t t;
-    int ret;
-    struct _result result;
-
-    result.cpu = info->id;
-    ret = pthread_create(&t, NULL, _per_core_func, &result);
-    if (ret)
-        return -1;
-    ret = pthread_join(t, NULL);
-    if (ret)
-        return -1;
-
-    info->type = (enum core_type)result.type;
-    info->core_id = result.core_id;
-
-    return 0;
-}
+extern int init_core_info(struct core_info **infos, int *core_num);
+extern void clear_core_info(struct core_info **infos);
+extern int per_core_data(struct core_info *info);
+extern void update_cpu_utilization(struct core_info *info, int cpu_num);
 
 inline static int total_cpu_num(void) { return sysconf(_SC_NPROCESSORS_ONLN); }
 

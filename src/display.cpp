@@ -28,7 +28,8 @@ using time_ns = std::chrono::time_point<std::chrono::system_clock>;
 static volatile bool exiting = false;
 
 static std::mutex _g_mutex;
-static std::map<int, struct core_info> _core_map;
+static struct core_info *_core_map = NULL;
+static int _core_num = 0;
 static std::map<pid_t, struct vcpu_info> _vcpu_map;
 
 struct vcpu_info {
@@ -43,42 +44,15 @@ struct vcpu_info {
     std::vector<double> percent_on_perf_core;
 };
 
-int init_core_info(void)
-{
-    for (int i = 0; i < total_cpu_num(); i++) {
-        _core_map[i].id = i;
-        if (per_core_data(&_core_map[i]))
-            return -1;
-
-        /*
-         * Init the perf/effi values based on the most common values if no CPU
-         * load, in case:
-         * 1. Kernel is old or INTEL_HFI_THERMAL is not enabled
-         * 2. Some models report HFI data rarely, so after booting up the user
-         *    space will not get a notification for a long time.
-         * So these values are given manually, if HFI notification is properly
-         * set and the CPU models do report often, it could be changed anytime
-         * a HFI data notification is sent to user space.
-         */
-        if (_core_map[i].type == INTEL_CORE) {
-            _core_map[i].perf = 256;
-            _core_map[i].effi = 368;
-        } else if (_core_map[i].type == INTEL_ATOM) {
-            _core_map[i].perf = 152;
-            _core_map[i].effi = 400;
-        }
-    }
-
-    return 0;
-}
-
 static void update_core_info(int id, int perf, int effi)
 {
     std::lock_guard<std::mutex> guard(_g_mutex);
-    if (_core_map.find(id) != _core_map.end()) {
-        _core_map[id].perf = perf;
-        _core_map[id].effi = effi;
-    }
+
+    if (id >= _core_num)
+        return;
+
+    _core_map[id].perf = perf;
+    _core_map[id].effi = effi;
 }
 
 static pid_t get_qemu_pid_by_domain(virDomainPtr d)
@@ -173,12 +147,12 @@ static void add_vcpu_info_by_domain(virDomainPtr d, pid_t qemu_pid)
     info.last_time.resize(info.vcpu_num, curr);
     info.percent_on_perf_core.resize(info.vcpu_num);
     for (size_t i = 0; i < info.vcpu_num; i++) {
-        auto core = _core_map.find(info.curr_cpu[i]);
-        if (core == _core_map.end()) {
+        int cpu = info.curr_cpu[i];
+        if (cpu >= _core_num) {
             fprintf(stderr, "cannot find core info, likely programming error");
             return;
         }
-        if (core->second.type == INTEL_CORE)
+        if (_core_map[cpu].type == INTEL_CORE)
             info.percent_on_perf_core[i] = 1.0;
     }
 
@@ -230,7 +204,8 @@ static int init_vcpu_info(void)
     return 0;
 }
 
-static void update_percentage(struct vcpu_info &info, unsigned int vcpu_id)
+static void update_vcpu_hybrid_percentage(struct vcpu_info &info,
+                                          unsigned int vcpu_id)
 {
     auto curr = system_clock::now();
     auto start = info.start_time[vcpu_id];
@@ -240,12 +215,12 @@ static void update_percentage(struct vcpu_info &info, unsigned int vcpu_id)
 
     info.last_time[vcpu_id] = curr;
 
-    auto core = _core_map.find(info.curr_cpu[vcpu_id]);
-    if (core == _core_map.end()) {
+    int cpu = info.curr_cpu[vcpu_id];
+    if (cpu >= _core_num) {
         fprintf(stderr, "cannot find core info, likely programming error");
         return;
     }
-    int on_P = (core->second.type == INTEL_CORE) ? 1 : 0;
+    int on_P = (_core_map[cpu].type == INTEL_CORE) ? 1 : 0;
 
     auto total_ns = duration_cast<nanoseconds>(curr - start).count();
     auto last_ns = duration_cast<nanoseconds>(last - start).count();
@@ -268,10 +243,9 @@ static void update_vcpu_info(pid_t qemu_id, unsigned int vcpu_id,
     auto &domain = _vcpu_map[qemu_id];
 
     // update vcpu P-core percent
-    update_percentage(domain, vcpu_id);
+    update_vcpu_hybrid_percentage(domain, vcpu_id);
 
     domain.curr_cpu[vcpu_id] = cpu;
-
 }
 
 static void kvm_exit_func(struct kvm_exit_info *info)
@@ -322,7 +296,7 @@ static void sig_handler(int sig) { exiting = true; }
 extern "C" {
 #endif
 
-void display_loop(void)
+int display_loop(void)
 {
     int err;
     bool hfi_inited = false;
@@ -330,20 +304,25 @@ void display_loop(void)
     signal(SIGINT, sig_handler);
     signal(SIGTERM, sig_handler);
 
-    err = init_core_info();
-    if (err)
-        return;
+    err = init_core_info(&_core_map, &_core_num);
+    if (err) {
+        fprintf(stderr, "cannot get CPU info\n");
+        return -1;
+    }
 
     err = init_vcpu_info();
-    if (err)
-        return;
+    if (err) {
+        fprintf(stderr, "cannot get KVM guest vcpu info\n");
+        return -1;
+    }
 
     err = hfi_init(hfi_cb);
     if (err) {
         fprintf(stderr, "Warning: cannot get HFI info from kernel, probably "
                         "the kernel is older than 5.18 or config "
                         "CONFIG_INTEL_HFI_THERMAL is not enabled;\n"
-                        "Warning: no HFI per core info available\n");
+                        "Warning: no HFI per core info available, the "
+                        "perf/effi data won't be updated\n");
         hfi_inited = false;
     } else {
         hfi_inited = true;
@@ -358,22 +337,26 @@ void display_loop(void)
         printf("==========================================================\n");
         std::unique_lock<std::mutex> lock(_g_mutex);
         for (auto it = _vcpu_map.begin(); it != _vcpu_map.end(); it++) {
-            printf("KVM guest domain %s (id %u) (qemu pid %u)\n",
+            printf("KVM guest domain %s (id %3u) (qemu pid %u)\n",
                    it->second.domain_name.c_str(), it->second.domain_id,
                    it->first);
             for (int i = 0; i < it->second.vcpu_num; i++) {
-                update_percentage(it->second, i);
-                printf("\tvcpu %u \t-> Core %d \t%f%% on P-core\n", i,
+                update_vcpu_hybrid_percentage(it->second, i);
+                printf("\tvcpu %3u -> Core %3d %8.4f%% on P-core\n", i,
                        it->second.curr_cpu[i],
                        it->second.percent_on_perf_core[i] * 100);
             }
         }
-        for (auto it = _core_map.cbegin(); it != _core_map.cend(); it++) {
-            printf("Core %d (%d, %s) - perf %u effi %u\n", it->first,
-                   it->second.core_id,
-                   (it->second.type == INTEL_CORE) ? "P-core" : "E-core",
-                   it->second.perf, it->second.effi);
+
+        update_cpu_utilization(_core_map, _core_num);
+        for (int i = 0; i < _core_num; i++) {
+            printf("Core %3d (%3d, %s) - %6.2f%% - perf %3u effi %3u\n",
+                   _core_map[i].id, _core_map[i].core_id,
+                   (_core_map[i].type == INTEL_CORE) ? "P-core" : "E-core",
+                   _core_map[i].precent * 100, _core_map[i].perf,
+                   _core_map[i].effi);
         }
+
         lock.unlock();
         std::this_thread::sleep_for(1000ms);
     }
@@ -382,6 +365,10 @@ void display_loop(void)
         bpf_thread.join();
     if (hfi_thread.joinable())
         hfi_thread.join();
+
+    clear_core_info(&_core_map);
+
+    return 0;
 }
 
 #ifdef __cplusplus

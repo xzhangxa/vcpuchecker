@@ -5,7 +5,7 @@
 #include <argp.h>
 #include "cpu.h"
 
-extern void display_loop(void);
+extern int display_loop(void);
 
 const char *argp_program_version = "vcpuchecker 0.0";
 const char argp_program_doc[] =
@@ -53,7 +53,8 @@ int main(int argc, char **argv)
         return EXIT_FAILURE;
     }
 
-    display_loop();
+    if ((err = display_loop()) != 0)
+        return EXIT_FAILURE;
 
     return EXIT_SUCCESS;
 }
