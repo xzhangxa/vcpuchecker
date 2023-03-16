@@ -18,6 +18,7 @@
 #include "cpu.h"
 #include "kvm_exit.h"
 #include "hfi.h"
+#include "usched.hpp"
 
 using namespace std::chrono_literals;
 using namespace std::chrono;
@@ -231,7 +232,7 @@ static void update_vcpu_hybrid_percentage(struct vcpu_info &info,
     info.percent_on_perf_core[vcpu_id] = new_percent;
 }
 
-static void update_vcpu_info(pid_t qemu_id, unsigned int vcpu_id,
+static void update_vcpu_info(pid_t qemu_id, pid_t tid, unsigned int vcpu_id,
                              unsigned int orig_cpu, unsigned int cpu,
                              uint64_t time_ns)
 {
@@ -241,7 +242,6 @@ static void update_vcpu_info(pid_t qemu_id, unsigned int vcpu_id,
         add_vcpu_info_by_pid(qemu_id);
 
     auto &domain = _vcpu_map[qemu_id];
-
     // update vcpu P-core percent
     update_vcpu_hybrid_percentage(domain, vcpu_id);
 
@@ -256,8 +256,10 @@ static void kvm_exit_func(struct kvm_exit_info *info)
            info->comm, info->tgid, info->pid, info->vcpu_id, info->orig_cpu,
            info->cpu, vmx_exit_str(info->exit_reason), info->time_ns);
     */
-    update_vcpu_info(info->tgid, info->vcpu_id, info->orig_cpu, info->cpu,
-                     info->time_ns);
+    update_vcpu_info(info->tgid, info->pid, info->vcpu_id, info->orig_cpu,
+                     info->cpu, info->time_ns);
+    // add to thread_pool
+    upsert_to_monitor_pool(info->tgid, info->pid,NULL);
 }
 
 static void kvm_exit_loop()
@@ -327,6 +329,7 @@ int display_loop(void)
     } else {
         hfi_inited = true;
     }
+    set_usched_threshold(10);
 
     std::thread bpf_thread{kvm_exit_loop};
     std::thread hfi_thread;
@@ -335,6 +338,7 @@ int display_loop(void)
 
     while (!exiting) {
         printf("==========================================================\n");
+
         std::unique_lock<std::mutex> lock(_g_mutex);
         for (auto it = _vcpu_map.begin(); it != _vcpu_map.end(); it++) {
             printf("KVM guest domain %s (id %3u) (qemu pid %u)\n",
@@ -349,6 +353,8 @@ int display_loop(void)
         }
 
         update_cpu_utilization(_core_map, _core_num);
+        usched_entry(_core_map);
+
         for (int i = 0; i < _core_num; i++) {
             printf("Core %3d (%3d, %s) - %6.2f%% - perf %3u effi %3u\n",
                    _core_map[i].id, _core_map[i].core_id,
