@@ -27,6 +27,7 @@ struct pid_usage_info {
     unsigned long long utime;
     unsigned long long stime;
 
+    pid_usage_info() {}
     pid_usage_info(double percent, unsigned long long utime,
                    unsigned long long stime)
     {
@@ -41,10 +42,11 @@ struct pid_info {
     int last_cpu;
     std::queue<int> cpuoff;
     bool sched;
-    struct pid_usage_info *_pid_usage_info;
+    struct pid_usage_info _pid_usage_info;
 
+    pid_info() {}
     pid_info(pid_t _thread_id, pid_t ppid, int last_cpu,
-             struct pid_usage_info *pui)
+             struct pid_usage_info pui)
     {
         this->ppid = ppid;
         this->_thread_id = _thread_id;
@@ -53,7 +55,7 @@ struct pid_info {
         this->_pid_usage_info = pui;
     }
 
-    ~pid_info() { delete _pid_usage_info; }
+    ~pid_info() {}
 };
 enum MASK_DIR { CPUON, CPUOFF };
 enum TID_STAT_ITEM {
@@ -109,7 +111,9 @@ enum TID_STAT_ITEM {
     EXIT_CODE
 };
 
-extern bool upsert_to_monitor_pool(pid_t qemu_id, pid_t tid,struct pid_info *_pid_info);
+extern bool upsert_to_monitor_pool(pid_t qemu_id, pid_t tid,
+                                   struct pid_info *_pid_info,
+                                   struct core_info *_core_map);
 extern void usched_entry(struct core_info *_core_info);
 extern pid_t usched_check(struct core_info *_core_info,
                           struct pid_info *_pid_info);
@@ -117,6 +121,7 @@ extern bool usched_commit_change(pid_t _thread_id);
 extern bool usched_revert_change(pid_t _thread_id);
 extern bool set_affinity_byid(pid_t _thread_id, int num_cpu, enum MASK_DIR md);
 extern void set_usched_threshold(unsigned int num);
+extern void remove_from_monitor_pool(pid_t qemu_id, pid_t tid);
 
 #ifdef __cplusplus
 }

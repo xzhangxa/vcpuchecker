@@ -259,7 +259,8 @@ static void kvm_exit_func(struct kvm_exit_info *info)
     update_vcpu_info(info->tgid, info->pid, info->vcpu_id, info->orig_cpu,
                      info->cpu, info->time_ns);
     // add to thread_pool
-    upsert_to_monitor_pool(info->tgid, info->pid,NULL);
+    struct pid_info _pid_info; _pid_info.ppid=0;
+    upsert_to_monitor_pool(info->tgid, info->pid,NULL,_core_map);
 }
 
 static void kvm_exit_loop()
