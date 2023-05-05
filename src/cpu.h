@@ -23,6 +23,7 @@ struct core_info {
     int effi;
     int core_id;
     enum core_type type;
+    int hwp_cap_hi_perf;
     double precent;
 
     unsigned long long int _total;
