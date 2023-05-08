@@ -49,3 +49,4 @@ target_link_libraries(${PROJECT_NAME} kvm_exit_skel virt nl-3 nl-genl-3)
 
 add_executable(setup_shm src/setup_shm.c src/cpu.c)
 target_compile_options(setup_shm PRIVATE -D_GNU_SOURCE -pthread)
+target_link_libraries(setup_shm virt)
